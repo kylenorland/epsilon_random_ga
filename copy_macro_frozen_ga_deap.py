@@ -113,8 +113,7 @@ def eval_individual(ind, eval_settings):
             #print("Switching epsilon flag to: ", eval_settings['switching_flag'])
     
     #Initialize environment
-    #Had to change to avoid getting probability information.
-    obs = env.reset()[0]
+    obs = env.reset()
     
     #print("evaluating individual: ", ind)
     
@@ -142,19 +141,11 @@ def eval_individual(ind, eval_settings):
             action = random.randrange(env.action_space.n)
             #print("Taking random action: ", action)
         else:
-            #print("Testing ind and obs")
-            #print(ind)
-            #print(obs)
-            #print(obs[0])
-            #action = ind[obs[0]]   #Keep action from GA
             action = ind[obs]   #Keep action from GA
             #print("Taking preplanned action: ", action)
                    
         #Take the action
-        #step_result = env.step(action)
-        #print(step_result)
-        
-        obs, reward, done, _, _ = env.step(action)
+        obs, reward, done, _ = env.step(action)
         total_reward += reward
         
         #Increment time step
@@ -464,9 +455,6 @@ if __name__ == "__main__":
         print("Run")
         print(run)
         run['run_start_time'] = time.time()
-        
-        #Set up output dict entries.
-        run['output_dict']['pop_saves'] = []
 
         #Set random seeds
         random.seed(run['python_seed'])
@@ -516,8 +504,6 @@ if __name__ == "__main__":
         
         for key in ['epsilon_max', 'epsilon_min', 'epsilon_decrease_rule', 'epsilon_decay']:
             eval_settings[key] = run[key]
-            
-        #Set initial epsilon max.
         eval_settings['epsilon'] = eval_settings['epsilon_max']
         
         #Define operations
@@ -551,7 +537,7 @@ if __name__ == "__main__":
         #print(pop)
         #print(stats)
         print("Best agent: ", hof, '\n')
-        print(log)
+        #print(log)
         #print(log[0])
         #print(stats.compile(pop))
         

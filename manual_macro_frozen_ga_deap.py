@@ -1,7 +1,7 @@
 #Author: Kyle Norland
-#Date: 8-17-22, modified 11/23/22
+#Date: 8-17-22, modified 5/9/23
 #Purpose: Implement GA for a box environment and compare with SOTA, testing epsilon existence and settings, as well as population size.
-
+#Update: Switching to more manual implementation of algorithm, with eaSimple pulled from github for deap.
 
 #-------------------Imports-----------------------
 #General
@@ -42,8 +42,6 @@ from scoop import futures
 
 #Local
 import ga_eps_grapher
-
-
 
 #--------------------------------------------------
 #---------------------Functions--------------------
@@ -90,6 +88,9 @@ def init_environment(env_config):
     
     return env
 
+#-----------------------------------------------------
+#-----------------EA Algorithms-----------------------
+#-----------------------------------------------------
 def eval_individual(ind, eval_settings):
     env = eval_settings['env']
     episode_len = eval_settings['episode_len']
@@ -178,21 +179,95 @@ def eval_individual(ind, eval_settings):
     #print("Difference: ", (pre_epsilon - eval_settings['epsilon'])) 
     return total_reward, 
 
+def varAnd(population, toolbox, cxpb, mutpb):
+    offspring = [toolbox.clone(ind) for ind in population]
+
+    # Apply crossover and mutation on the offspring
+    for i in range(1, len(offspring), 2):
+        if random.random() < cxpb:
+            offspring[i - 1], offspring[i] = toolbox.mate(offspring[i - 1],
+                                                          offspring[i])
+            del offspring[i - 1].fitness.values, offspring[i].fitness.values
+
+    for i in range(len(offspring)):
+        if random.random() < mutpb:
+            offspring[i], = toolbox.mutate(offspring[i])
+            del offspring[i].fitness.values
+
+    return offspring
     
+def eaSimple(population, toolbox, cxpb, mutpb, ngen, stats=None,
+             halloffame=None, verbose=__debug__):
+    logbook = tools.Logbook()
+    logbook.header = ['gen', 'nevals'] + (stats.fields if stats else [])
+    
+    #Structure to save populations (as tuples with gen)
+    saved_pops = []
+    
+    #Initial population
+    saved_pops.append((0,copy.deepcopy(population)))
+
+    # Evaluate the individuals with an invalid fitness
+    invalid_ind = [ind for ind in population if not ind.fitness.valid]
+    fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+    for ind, fit in zip(invalid_ind, fitnesses):
+        ind.fitness.values = fit
+
+    if halloffame is not None:
+        halloffame.update(population)
+
+    record = stats.compile(population) if stats else {}
+    logbook.record(gen=0, nevals=len(invalid_ind), **record)
+    if verbose:
+        print(logbook.stream)
+
+    # Begin the generational process
+    for gen in range(1, ngen + 1):
+        # Select the next generation individuals
+        offspring = toolbox.select(population, len(population))
+
+        # Vary the pool of individuals
+        offspring = varAnd(offspring, toolbox, cxpb, mutpb)
+        if gen % 50 == 0 and gen!= 0:
+            saved_pops.append((gen, copy.deepcopy(offspring)))
+
+        # Evaluate the individuals with an invalid fitness
+        invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
+        fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+        for ind, fit in zip(invalid_ind, fitnesses):
+            ind.fitness.values = fit
+
+        # Update the hall of fame with the generated individuals
+        if halloffame is not None:
+            halloffame.update(offspring)
+
+        # Replace the current population by the offspring
+        population[:] = offspring
+
+        # Append the current generation statistics to the logbook
+        record = stats.compile(population) if stats else {}
+        logbook.record(gen=gen, nevals=len(invalid_ind), **record)
+        if verbose:
+            print(logbook.stream)
+
+    return population, logbook, saved_pops   
+    
+     
 #-------------------Experiments---------------------------
 def gen_epsilon_exist(default_run):
     #Description: Test epsilon setting 0 vs 50%
     #Try with two epsilon settings and 10 different random seeds.
     #epsilon_maxes = [0, 0.05, 0.1, 0.25, 0.5]
     #epsilon_maxes = [0, 0.25, 0.5, 0.75]
-    epsilon_maxes = [0, 0.5]
-    random_seeds = rng.integers(low=0, high=9999, size=2)
+    epsilon_maxes = [0,0.33, 0.75]
+    random_seeds = rng.integers(low=0, high=9999, size=3)
     
     new_experiment = {'runs':[]}
     new_experiment['generation_time']= time.time()
     new_experiment['variables'] = ['epsilon_max', 'np_seed']
+    new_experiment['title'] = "Starting Epsilon Value Vs Average Reward"
     
-    color_list = ['green', 'blue', 'red', 'yellow', 'orange', 'brown']
+    color_list = ['green', 'blue', 'red', 'orange', 'brown']
     for i, epsilon_max in enumerate(epsilon_maxes):
         for seed in random_seeds:
             new_run = copy.deepcopy(default_run)
@@ -201,7 +276,8 @@ def gen_epsilon_exist(default_run):
             new_run['env_seed'] = seed
             new_run['python_seed'] = seed
             new_run['color'] = color_list[i]
-            new_run['label'] = "eps_max: " + str(epsilon_max) + " seed: " + str(seed)
+            new_run['label'] = "Starting Epsilon: " + str(epsilon_max) + " seed: " + str(seed)
+            new_run['title'] = "Starting Epsilon Value Vs Average Reward"
             
             print("Settings: ", new_run['epsilon_max'], ": ", seed)
             
@@ -215,15 +291,16 @@ def mutation_vs_epsilon(default_run):
     #Description: Test epsilon setting 0 vs 50%
     #Try with two epsilon settings and 10 different random seeds.
     #epsilon_maxes = [0, 0.05, 0.1, 0.25, 0.5]
-    epsilon_maxes = [0, 0.25]
-    mutation_probs = [0, 0.25, 0.5]
+    epsilon_maxes = [0, 0.5]
+    mutation_probs = [0, 0.5]
     random_seeds = rng.integers(low=0, high=9999, size=3)
     
     new_experiment = {'runs':[]}
     new_experiment['generation_time']= time.time()
     new_experiment['variables'] = ['epsilon_max', 'mutation_prob', 'np_seed']
+    new_experiment['title'] = "Epsilon Value and Mutation Probability vs Avg. Reward"
     
-    color_list = ['green', 'blue', 'red', 'yellow', 'orange', 'brown']
+    color_list = ['green', 'blue', 'red', 'orange', 'brown']
     color_counter = 0
     for epsilon_max in epsilon_maxes:
         for mutation_prob in mutation_probs:
@@ -235,7 +312,7 @@ def mutation_vs_epsilon(default_run):
                 new_run['env_seed'] = seed
                 new_run['python_seed'] = seed
                 new_run['color'] = color_list[color_counter]
-                new_run['label'] = "eps_max: " + str(epsilon_max) + " mutation_prob: "+ str(mutation_prob) +  " seed: " + str(seed)
+                new_run['label'] = "Starting Epsilon: " + str(epsilon_max) + " Mutation Prob: "+ str(mutation_prob) +  " seed: " + str(seed)
                 
                 print("Settings: ", new_run['epsilon_max'], ": ", seed)
                 
@@ -245,43 +322,7 @@ def mutation_vs_epsilon(default_run):
             color_counter += 1   
     print("Returning new experiment")
     return new_experiment        
-    
-def gen_pop_size(default_run):
-    #Description: Test different population sizes and different epsilons
-    
-    #Try with two epsilon settings and two population sizes.
-    #epsilon_maxes = [0, 0.05, 0.1, 0.25, 0.5]
-    epsilon_maxes = [0.25]
-    pop_sizes = [25, 50, 100]
-    random_seeds = rng.integers(low=0, high=9999, size=3)
-    
-    new_experiment = {'runs':[]}
-    new_experiment['generation_time']= time.time()
-    new_experiment['variables'] = ['epsilon_max', 'pop_size', 'np_seed']
-    
-    color_list = ['green', 'blue', 'red', 'yellow', 'orange', 'brown']
-    color_counter = 0
-    for epsilon_max in epsilon_maxes:
-        for pop_size in pop_sizes:
-            for seed in random_seeds:
-                new_run = copy.deepcopy(default_run)
-                new_run['epsilon_max'] = epsilon_max
-                new_run['pop_size'] = pop_size
-                new_run['np_seed'] = seed
-                new_run['env_seed'] = seed
-                new_run['python_seed'] = seed
-                new_run['color'] = color_list[color_counter]
-                new_run['label'] = "eps_max: " + str(epsilon_max) + " pop_size: "+ str(pop_size) +  " seed: " + str(seed)
-                
-                print("Settings: ", new_run['epsilon_max'], ": ", seed)
-                
-                #Add run to experiment
-                new_experiment['runs'].append(copy.deepcopy(new_run))
-            
-            color_counter += 1   
-    print("Returning new experiment")
-    return new_experiment 
-    
+
 def gen_slippery(default_run):
     #Description: Test Performance if Slippery or Not
     #Try with slippery or not standard GA and 10 different random seeds.
@@ -359,14 +400,15 @@ def epsilon_switching(default_run):
 def gen_mutation_rates(default_run):
     #Description: Test performance across different mutation rates
     #Try with several mutation values and different random seeds.
-    mutation_probs = [0, 0.25, 0.5, 0.75, 1]
+    mutation_probs = [0, 0.5, 1]
     random_seeds = rng.integers(low=0, high=9999, size=3)
     
     new_experiment = {'runs':[]}
     new_experiment['generation_time']= time.time()
     new_experiment['variables'] = ['mutation_prob']
+    new_experiment['title'] = "Mutation Probability Vs Average Reward"
     
-    color_list = ['green', 'blue', 'red', 'yellow', 'orange', 'brown']
+    color_list = ['green', 'blue', 'red', 'orange', 'brown']
     color_counter = 0
     for mutation_prob in mutation_probs:
         for seed in random_seeds:
@@ -386,6 +428,44 @@ def gen_mutation_rates(default_run):
         color_counter += 1   
     print("Returning new experiment")
     return new_experiment 
+ 
+def gen_pop_size(default_run):
+    #Description: Test different population sizes and different epsilons
+    
+    #Try with two epsilon settings and two population sizes.
+    #epsilon_maxes = [0, 0.05, 0.1, 0.25, 0.5]
+    epsilon_maxes = [0.25]
+    pop_sizes = [25, 50, 100]
+    random_seeds = rng.integers(low=0, high=9999, size=3)
+    
+    new_experiment = {'runs':[]}
+    new_experiment['generation_time']= time.time()
+    new_experiment['variables'] = ['epsilon_max', 'pop_size', 'np_seed']
+    new_experiment['title'] = "Population Size Vs Average Reward (With Epsilon-Greedy Evaluation)"
+    
+    color_list = ['green', 'blue', 'red', 'orange', 'brown']
+    color_counter = 0
+    for epsilon_max in epsilon_maxes:
+        for pop_size in pop_sizes:
+            for seed in random_seeds:
+                new_run = copy.deepcopy(default_run)
+                new_run['epsilon_max'] = epsilon_max
+                new_run['pop_size'] = pop_size
+                new_run['np_seed'] = seed
+                new_run['env_seed'] = seed
+                new_run['python_seed'] = seed
+                new_run['color'] = color_list[color_counter]
+                new_run['label'] = "Starting Epsilon: " + str(epsilon_max) + " Pop. Size: "+ str(pop_size) +  " seed: " + str(seed)
+                
+                print("Settings: ", new_run['epsilon_max'], ": ", seed)
+                
+                #Add run to experiment
+                new_experiment['runs'].append(copy.deepcopy(new_run))
+            
+            color_counter += 1   
+    print("Returning new experiment")
+    return new_experiment 
+    
 #----------------------------------------------------
 #-----------------MAIN-------------------------------
 #----------------------------------------------------
@@ -398,7 +478,7 @@ if __name__ == "__main__":
     #Default Run Settings    
     default_run = {}    
     default_run['generation_date'] = time.time()
-    default_run['pop_size'] = 50
+    default_run['pop_size'] = 50 #50
     default_run['ngen'] = 150
     default_run['episode_len'] = 100
     default_run['np_seed'] = 345
@@ -442,11 +522,12 @@ if __name__ == "__main__":
     
     if generate_mode:
         #Generate experiment
-        experiment = copy.deepcopy(gen_epsilon_exist(default_run))
-        #experiment = copy.deepcopy(gen_pop_size(default_run))
-        #experiment = copy.deepcopy(mutation_vs_epsilon(default_run))
         #experiment = copy.deepcopy(gen_slippery(default_run))
         #experiment = copy.deepcopy(gen_mutation_rates(default_run))
+        #experiment = copy.deepcopy(gen_epsilon_exist(default_run))
+        #experiment = copy.deepcopy(mutation_vs_epsilon(default_run))
+        experiment = copy.deepcopy(gen_pop_size(default_run))
+        
         #experiment = copy.deepcopy(epsilon_switching(default_run))
         #Save experiment
         experiment_name = str(experiment['generation_time']) + '.json'
@@ -466,7 +547,7 @@ if __name__ == "__main__":
         run['run_start_time'] = time.time()
         
         #Set up output dict entries.
-        run['output_dict']['pop_saves'] = []
+        run['output_dict']['saved_popss'] = []
 
         #Set random seeds
         random.seed(run['python_seed'])
@@ -531,6 +612,9 @@ if __name__ == "__main__":
         #Create the population and run the evolution
         pop = toolbox.population(n=run['pop_size'])
         
+        #print("Initial population")
+        #print(pop)
+        
         
         #Register stats and other records
         hof = tools.HallOfFame(1)
@@ -541,8 +625,14 @@ if __name__ == "__main__":
         stats.register("max", np.max)
 
         #Run the algorithm using a pre-set training algorithm.
+        #Original Version
+        '''
         pop, log = algorithms.eaSimple(pop, toolbox, cxpb=run['crossover_prob'], mutpb=run['mutation_prob'], ngen=run['ngen'], 
                                        stats=stats, halloffame=hof, verbose=False)
+        '''
+        #Local Version
+        pop, log, saved_pops = eaSimple(pop, toolbox, cxpb=run['crossover_prob'], mutpb=run['mutation_prob'], ngen=run['ngen'], 
+                               stats=stats, halloffame=hof, verbose=False)
 
         run['time_taken'] = time.time() - run['run_start_time']
         print("Time taken: ", run['time_taken'])
@@ -550,15 +640,19 @@ if __name__ == "__main__":
         #Get best agent and try it
         #print(pop)
         #print(stats)
-        print("Best agent: ", hof, '\n')
-        print(log)
+        #print("Best agent: ", hof, '\n')
+        #print(log)
         #print(log[0])
         #print(stats.compile(pop))
+        print("saved_pops")
+        print(saved_pops)
         
         
         #-----------------------Output_Data--------------------------
         output = run['output_dict']
         output['stats'] = [x for x in log]
+        #Save the saved populations
+        output['saved_pops'] = saved_pops
             
         #Save the JSON outputs
 
@@ -576,7 +670,11 @@ if __name__ == "__main__":
     
     save_name = "json_output.json"
     with open(os.path.join('results', out_folder_name, save_name ), 'w') as f:
-        json.dump(experiment, f, cls=MyEncoder)    
+        json.dump(experiment, f, cls=MyEncoder)
+
+    #Save as most recent as well
+    with open(os.path.join('results', 'most_recent.json' ), 'w') as f:
+        json.dump(experiment, f, cls=MyEncoder)
     
     #Save a text file with the changed variables
     save_name = '+'.join(experiment['variables'])
